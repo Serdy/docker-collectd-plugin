@@ -31,6 +31,7 @@ import threading
 import time
 import sys
 import re
+import subprocess
 
 
 def _c(c):
@@ -75,8 +76,21 @@ class Stats:
 
 
 class BlkioStats(Stats):
-    @classmethod
+    @classmethod                
     def read(cls, container, stats, t):
+        udevadm = "/sbin/udevadm info --export-db"
+        process = subprocess.Popen(udevadm.split(), stdout=subprocess.PIPE)
+        output = process.communicate()[0]
+        devices = output.split('\n\n')
+        def device_name(major, minor, devices):
+            for device in devices:
+                if "MAJOR=" + str(major) + "\n" in device and "MINOR=" + str(minor) + "\n" in device:
+                    each_device = device.split('\n')
+                    for device_line in each_device:
+                        if device_line.startswith("P") :
+                            device_name = device_line.rsplit('/', 1)[-1]
+                            return device_name
+        
         blkio_stats = stats['blkio_stats']
         for key, values in blkio_stats.items():
             # Block IO stats are reported by block device (with major/minor
@@ -84,9 +98,7 @@ class BlkioStats(Stats):
             # device independently.
             device_stats = {}
             for value in values:
-                k = '{key}-{major}-{minor}'.format(key=key,
-                                                   major=value['major'],
-                                                   minor=value['minor'])
+                k = '{key}-{device_name}'.format(key=key,device_name=device_name(value['major'], value['minor'], devices))
                 if k not in device_stats:
                     device_stats[k] = []
                 device_stats[k].append(value['value'])
@@ -98,7 +110,7 @@ class BlkioStats(Stats):
                 elif len(values) == 1:
                     # For some reason, some fields contains only one value and
                     # the 'op' field is empty. Need to investigate this
-                    cls.emit(container, 'blkio.single', values,
+                    cls.emit(container, 'blkio_single', values,
                              type_instance=key, t=t)
                 else:
                     collectd.warn(('Unexpected number of blkio stats for '
@@ -114,7 +126,7 @@ class CpuStats(Stats):
 
         percpu = cpu_usage['percpu_usage']
         for cpu, value in enumerate(percpu):
-            cls.emit(container, 'cpu.percpu.usage', [value],
+            cls.emit(container, 'cpu_percpu_usage', [value],
                      type_instance='cpu%d' % (cpu,), t=t)
 
         items = sorted(cpu_stats['throttling_data'].items())
@@ -123,7 +135,7 @@ class CpuStats(Stats):
         system_cpu_usage = cpu_stats['system_cpu_usage']
         values = [cpu_usage['total_usage'], cpu_usage['usage_in_kernelmode'],
                   cpu_usage['usage_in_usermode'], system_cpu_usage]
-        cls.emit(container, 'cpu.usage', values, t=t)
+        cls.emit(container, 'cpu_usage', values, t=t)
 
         # CPU Percentage based on calculateCPUPercent Docker method
         # https://github.com/docker/docker/blob/master/api/client/stats.go
@@ -134,15 +146,16 @@ class CpuStats(Stats):
             cpu_delta = cpu_usage['total_usage'] - precpu_usage['total_usage']
             system_delta = system_cpu_usage - precpu_stats['system_cpu_usage']
             if system_delta > 0 and cpu_delta > 0:
-                cpu_percent = 100.0 * cpu_delta / system_delta * len(percpu)
-        cls.emit(container, "cpu.percent", ["%.2f" % (cpu_percent)], t=t)
+                # cpu_percent = 100.0 * cpu_delta / system_delta * len(percpu)
+                cpu_percent = 100.0 * cpu_delta / system_delta 
+        cls.emit(container, "cpu_percent", ["%.2f" % (cpu_percent)], t=t)
 
 
 class NetworkStats(Stats):
     @classmethod
     def read(cls, container, stats, t):
         items = sorted(stats['network'].items())
-        cls.emit(container, 'network.usage', [x[1] for x in items], t=t)
+        cls.emit(container, 'network_usage', [x[1] for x in items], t=t)
 
 
 class MemoryStats(Stats):
@@ -151,14 +164,14 @@ class MemoryStats(Stats):
         mem_stats = stats['memory_stats']
         values = [mem_stats['limit'], mem_stats['max_usage'],
                   mem_stats['usage']]
-        cls.emit(container, 'memory.usage', values, t=t)
+        cls.emit(container, 'memory_usage', values, t=t)
 
         for key, value in mem_stats['stats'].items():
-            cls.emit(container, 'memory.stats', [value],
+            cls.emit(container, 'memory_stats', [value],
                      type_instance=key, t=t)
 
         mem_percent = 100.0 * mem_stats['usage'] / mem_stats['limit']
-        cls.emit(container, 'memory.percent', ["%.2f" % mem_percent], t=t)
+        cls.emit(container, 'memory_percent', ["%.2f" % mem_percent], t=t)
 
 
 class ContainerStats(threading.Thread):
