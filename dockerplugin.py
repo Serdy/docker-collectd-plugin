@@ -173,6 +173,9 @@ class MemoryStats(Stats):
         mem_percent = 100.0 * mem_stats['usage'] / mem_stats['limit']
         cls.emit(container, 'memory_percent', ["%.2f" % mem_percent], t=t)
 
+        mem_active_percent = 100.0 * mem_stats['stats']['active_anon'] / mem_stats['limit']
+        cls.emit(container, 'memory_active_percent', ["%.2f" % mem_active_percent], t=t)
+
 
 class ContainerStats(threading.Thread):
     """
